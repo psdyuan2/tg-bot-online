@@ -44,7 +44,7 @@ def build_notify_router(
     async def show_u_rate(message: Message) -> None:
         async with session_factory() as session:
             u_rate = await SystemConfigService.get_u_rate(session, default_u_rate)
-        await message.answer(f"当前 U 价: {u_rate}")
+        await message.answer(f"今日u价 {u_rate}")
 
     @router.message(Command(commands=["payout"]))
     async def payout(message: Message) -> None:
