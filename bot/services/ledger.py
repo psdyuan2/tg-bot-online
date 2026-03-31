@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+import string
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -12,6 +14,10 @@ from bot.services.finance import FinanceService, PayoutResult, SettlementResult
 
 
 U_RATE_KEY = "U_RATE"
+
+
+def merchant_display(merchant: Merchant) -> str:
+    return merchant.merchant_code or merchant.merchant_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,9 +56,58 @@ class SystemConfigService:
 
 class MerchantService:
     @staticmethod
+    def _generate_code_candidate(length: int = 8) -> str:
+        alphabet = string.ascii_lowercase + string.digits
+        return "".join(secrets.choice(alphabet) for _ in range(length))
+
+    @staticmethod
+    async def create_unique_merchant_code(session: AsyncSession) -> str:
+        for _ in range(128):
+            code = MerchantService._generate_code_candidate()
+            result = await session.execute(
+                select(Merchant.id).where(Merchant.merchant_code == code).limit(1)
+            )
+            if result.scalar_one_or_none() is None:
+                return code
+        raise RuntimeError("无法生成唯一商户标识，请稍后重试")
+
+    @staticmethod
+    async def register_merchant_code_for_chat(
+        session: AsyncSession,
+        chat_id: int,
+    ) -> str:
+        merchant = await MerchantService.get_by_chat_id(session, chat_id)
+        if merchant is not None and merchant.merchant_code is not None:
+            return f"本群已设置商户标识: {merchant.merchant_code}，无需重复创建。"
+
+        if merchant is not None:
+            code = await MerchantService.create_unique_merchant_code(session)
+            merchant.merchant_code = code
+            await session.commit()
+            await session.refresh(merchant)
+            return f"已为本群设置商户标识: {code}"
+
+        code = await MerchantService.create_unique_merchant_code(session)
+        merchant_name = f"g_{code}"[:255]
+        session.add(
+            Merchant(
+                merchant_name=merchant_name,
+                merchant_code=code,
+                tg_chat_id=chat_id,
+                balance=0,
+            )
+        )
+        await session.commit()
+        return f"已为本群创建商户并分配标识: {code}"
+
+    @staticmethod
     def merchant_identifier_query(identifier: str) -> Select[tuple[Merchant]]:
         value = identifier.strip()
-        conditions = [Merchant.merchant_name == value]
+        lowered = value.lower()
+        conditions = [
+            Merchant.merchant_name == value,
+            Merchant.merchant_code == lowered,
+        ]
         if value.isdigit():
             conditions.append(Merchant.id == int(value))
         return select(Merchant).where(or_(*conditions))

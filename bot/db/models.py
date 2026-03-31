@@ -27,6 +27,12 @@ class Merchant(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     merchant_name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    merchant_code: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     tg_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
     balance: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
 
