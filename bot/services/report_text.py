@@ -31,7 +31,7 @@ def format_merchant_group_report(
         f"服务佣金 ({fee_pct:g}%): -{MoneyService.format_cents(settle_fee_cents)}",
         f"本笔结算净入账：{MoneyService.format_cents(settle_net_cents)}",
         "",
-        "🚩 代付记录（最近一笔）",
+        "🚩 代付记录（本结算批次）",
         f"💰 申请金额：{MoneyService.format_cents(payout_principal_cents)}",
         f"银行手续费（1.5%）：{MoneyService.format_cents(bank_fee_cents)}",
         f"实际到账：{MoneyService.format_cents(actual_arrival_cents)}",

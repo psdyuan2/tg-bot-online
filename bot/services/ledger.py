@@ -5,7 +5,7 @@ import string
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import Select, desc, or_, select
+from sqlalchemy import Select, and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import BenefitGroupBinding, Merchant, SystemConfig, Transaction
@@ -23,7 +23,7 @@ def merchant_display(merchant: Merchant) -> str:
 
 @dataclass(frozen=True, slots=True)
 class LastTxnReportSnapshot:
-    """最近一次结算、最近一次代付（各一笔），非当日累计。"""
+    """最近一笔结算；代付为与该笔结算同一批次（该 settle 之后至下一笔 settle 之前）的代付合计。"""
 
     settle_gross_cents: int
     settle_fee_cents: int
@@ -299,22 +299,41 @@ class ReportService:
             .limit(1)
         )
         st = r_settle.scalar_one_or_none()
-        r_payout = await session.execute(
-            select(Transaction)
-            .where(Transaction.merchant_id == merchant_id, Transaction.tx_type == "payout")
-            .order_by(desc(Transaction.created_at))
-            .limit(1)
-        )
-        pt = r_payout.scalar_one_or_none()
         sg, sf, sn = 0, 0, 0
         if st is not None:
             sg = int(st.amount)
             sf = int(st.fee)
             sn = sg - sf
+
         pp, pf = 0, 0
-        if pt is not None:
-            pp = int(pt.amount)
-            pf = int(pt.fee)
+        if st is not None:
+            r_next_settle = await session.execute(
+                select(Transaction)
+                .where(
+                    Transaction.merchant_id == merchant_id,
+                    Transaction.tx_type == "settle",
+                    Transaction.created_at > st.created_at,
+                )
+                .order_by(Transaction.created_at.asc())
+                .limit(1)
+            )
+            next_st = r_next_settle.scalar_one_or_none()
+            payout_filters = [
+                Transaction.merchant_id == merchant_id,
+                Transaction.tx_type == "payout",
+                Transaction.created_at > st.created_at,
+            ]
+            if next_st is not None:
+                payout_filters.append(Transaction.created_at < next_st.created_at)
+            agg = await session.execute(
+                select(
+                    func.coalesce(func.sum(Transaction.amount), 0),
+                    func.coalesce(func.sum(Transaction.fee), 0),
+                ).where(and_(*payout_filters))
+            )
+            row = agg.one()
+            pp = int(row[0])
+            pf = int(row[1])
         return LastTxnReportSnapshot(
             settle_gross_cents=sg,
             settle_fee_cents=sf,
