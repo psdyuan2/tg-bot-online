@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, Uuid, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.db.base import Base
@@ -47,6 +47,25 @@ class Merchant(Base):
         back_populates="merchant",
         cascade="all, delete-orphan",
     )
+    benefit_bindings: Mapped[list[BenefitGroupBinding]] = relationship(
+        back_populates="merchant",
+        cascade="all, delete-orphan",
+    )
+
+
+class BenefitGroupBinding(Base):
+    __tablename__ = "benefit_group_bindings"
+    __table_args__ = (UniqueConstraint("benefit_chat_id", "merchant_id", name="uq_benefit_chat_merchant"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    benefit_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    merchant: Mapped[Merchant] = relationship(back_populates="benefit_bindings")
 
 
 class Transaction(Base):

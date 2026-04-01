@@ -10,8 +10,9 @@ def format_merchant_group_report(
     settle_gross_cents: int,
     settle_fee_cents: int,
     settle_fee_rate: Decimal,
+    settle_net_today_cents: int,
     payout_principal_cents: int,
-    balance_cents: int,
+    closing_balance_cents: int,
     merchant_u_rate: Decimal,
 ) -> str:
     fee_pct = (settle_fee_rate * Decimal(100)).quantize(Decimal("0.01"))
@@ -21,26 +22,28 @@ def format_merchant_group_report(
     actual_arrival_cents = int(
         (Decimal(payout_principal_cents) * Decimal("0.985")).quantize(Decimal("1"))
     )
-    usdt = FinanceService.calculate_usdt(balance_cents, merchant_u_rate)
+    usdt = FinanceService.calculate_usdt(closing_balance_cents, merchant_u_rate)
     lines = [
         "商户群结算消息模版",
         "",
         " 结算对账单 (INR)",
-        f"到账金额：{MoneyService.format_cents(settle_gross_cents)}",
+        f"到账金额（今日合计）：{MoneyService.format_cents(settle_gross_cents)}",
         f"服务佣金 ({fee_pct:g}%): -{MoneyService.format_cents(settle_fee_cents)}",
-        f"账内可用余额：{MoneyService.format_cents(balance_cents)}",
+        f"今日结算净入账：{MoneyService.format_cents(settle_net_today_cents)}",
         "",
-        "🚩 代付记录",
+        "🚩 代付记录（今日）",
         f"💰 申请金额：{MoneyService.format_cents(payout_principal_cents)}",
         f"银行手续费（1.5%）：{MoneyService.format_cents(bank_fee_cents)}",
         f"实际到账：{MoneyService.format_cents(actual_arrival_cents)}",
         "",
-        "🚩 结余换汇",
-        f"🚀 剩余金额：{MoneyService.format_cents(balance_cents)}",
+        "🚩 结余换汇（日结前）",
+        f"🚀 剩余金额（可用余额）：{MoneyService.format_cents(closing_balance_cents)}",
         (
-            f"🚀 下发金额：{MoneyService.format_cents(balance_cents)}/{merchant_u_rate}="
+            f"🚀 下发金额：{MoneyService.format_cents(closing_balance_cents)}/{merchant_u_rate}="
             f"{MoneyService.format_decimal(usdt)} USDT (汇率 {merchant_u_rate})"
         ),
+        "",
+        "本次对账后结算余额已清零。",
     ]
     return "\n".join(lines)
 
@@ -74,5 +77,7 @@ def format_admin_group_report(
             f"-{MoneyService.format_cents(payout_principal_cents)}-{MoneyService.format_cents(payout_fee_cents)}）"
             f"/{actual_u_rate}={MoneyService.format_decimal(usdt)}."
         ),
+        "",
+        "本次对账后结算余额已清零。",
     ]
     return "\n".join(lines)

@@ -27,6 +27,7 @@ async def run() -> None:
         build_admin_router(
             session_factory,
             notify_bot,
+            benefit_bot,
             settings.default_u_rate,
             settings.default_settle_fee_rate,
             settings.default_dividend_rate,

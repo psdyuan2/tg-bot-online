@@ -17,6 +17,7 @@ from bot.handlers.common import (
 )
 from bot.services.finance import FinanceService, MoneyService
 from bot.services.ledger import (
+    BenefitBindingService,
     LedgerService,
     MerchantService,
     ReportService,
@@ -29,6 +30,7 @@ from bot.services.report_text import format_admin_group_report, format_merchant_
 def build_admin_router(
     session_factory: async_sessionmaker[AsyncSession],
     notify_bot: Bot,
+    benefit_bot: Bot,
     default_u_rate: Decimal,
     default_settle_fee_rate: Decimal,
     default_dividend_rate: Decimal,
@@ -94,7 +96,7 @@ def build_admin_router(
 
             settle_fee = await SystemConfigService.get_settle_fee_rate(session, default_settle_fee_rate)
             dividend_rate = await SystemConfigService.get_dividend_rate(session, default_dividend_rate)
-            result = await LedgerService.settle(
+            result, dividend_usdt = await LedgerService.settle(
                 session,
                 merchant,
                 gross_amount_cents,
@@ -132,6 +134,27 @@ def build_admin_router(
             ),
         )
 
+        if dividend_usdt is not None and dividend_usdt > 0:
+            async with session_factory() as session:
+                benefit_chats = await BenefitBindingService.list_chats_for_merchant(session, merchant.id)
+            total_bb = MoneyService.format_usdt_balance(Decimal(merchant.benefit_balance))
+            div_line = MoneyService.format_usdt_balance(dividend_usdt)
+            notice = (
+                f"分红通知\n商户: {label}\n本笔净入账: {MoneyService.format_cents(result.net_amount_cents)}\n"
+                f"本笔分红: +{div_line} USDT\n该商户分红累计: {total_bb} USDT"
+            )
+            failed_chats: list[str] = []
+            for cid in benefit_chats:
+                try:
+                    await benefit_bot.send_message(cid, notice)
+                except TelegramForbiddenError:
+                    failed_chats.append(str(cid))
+            if failed_chats:
+                await message.answer(
+                    "分红通知未能发送到以下群（请确认分红机器人在群内且未被禁言）："
+                    + ", ".join(failed_chats)
+                )
+
     @router.message(Command(commands=["report"]))
     async def report(message: Message) -> None:
         args = split_command_args(message.text or "")
@@ -151,17 +174,21 @@ def build_admin_router(
                 await message.answer("未找到对应商户。")
                 return
             report_data = await ReportService.build_daily_report(session, locked)
-            actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
-            merchant_u = FinanceService.merchant_u_rate(actual_u)
-            settle_fee = await SystemConfigService.get_settle_fee_rate(session, default_settle_fee_rate)
+            await session.refresh(locked)
             balance_before = locked.balance
+
+            actual_u = await SystemConfigService.peek_u_rate(session, default_u_rate)
+            merchant_u = FinanceService.merchant_u_rate(actual_u)
+            settle_fee = await SystemConfigService.peek_settle_fee_rate(session, default_settle_fee_rate)
+            settle_net_today = report_data.settle_amount_cents - report_data.settle_fee_cents
 
             merchant_text = format_merchant_group_report(
                 settle_gross_cents=report_data.settle_amount_cents,
                 settle_fee_cents=report_data.settle_fee_cents,
                 settle_fee_rate=settle_fee,
+                settle_net_today_cents=settle_net_today,
                 payout_principal_cents=report_data.payout_amount_cents,
-                balance_cents=balance_before,
+                closing_balance_cents=balance_before,
                 merchant_u_rate=merchant_u,
             )
             admin_text = format_admin_group_report(

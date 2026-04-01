@@ -9,7 +9,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.models import Merchant, SystemConfig, Transaction
+from bot.db.models import BenefitGroupBinding, Merchant, SystemConfig, Transaction
 from bot.services.finance import FinanceService, MoneyService, PayoutResult, SettlementResult
 
 
@@ -96,6 +96,57 @@ class SystemConfigService:
             record.value = str(rate)
         await session.commit()
         return rate
+
+    @staticmethod
+    async def peek_u_rate(session: AsyncSession, default_rate: Decimal) -> Decimal:
+        record = await session.get(SystemConfig, U_RATE_KEY)
+        if record is None:
+            return default_rate
+        return Decimal(record.value)
+
+    @staticmethod
+    async def peek_settle_fee_rate(session: AsyncSession, default_rate: Decimal) -> Decimal:
+        record = await session.get(SystemConfig, SETTLE_FEE_RATE_KEY)
+        if record is None:
+            return default_rate
+        return Decimal(record.value)
+
+
+class BenefitBindingService:
+    @staticmethod
+    async def bind(session: AsyncSession, benefit_chat_id: int, merchant_id: int) -> bool:
+        existing = await session.execute(
+            select(BenefitGroupBinding.id).where(
+                BenefitGroupBinding.benefit_chat_id == benefit_chat_id,
+                BenefitGroupBinding.merchant_id == merchant_id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            return False
+        session.add(BenefitGroupBinding(benefit_chat_id=benefit_chat_id, merchant_id=merchant_id))
+        await session.commit()
+        return True
+
+    @staticmethod
+    async def list_chats_for_merchant(session: AsyncSession, merchant_id: int) -> list[int]:
+        rows = await session.execute(
+            select(BenefitGroupBinding.benefit_chat_id).where(
+                BenefitGroupBinding.merchant_id == merchant_id
+            )
+        )
+        return [int(r[0]) for r in rows.all()]
+
+    @staticmethod
+    async def list_merchants_for_benefit_chat(
+        session: AsyncSession,
+        benefit_chat_id: int,
+    ) -> list[Merchant]:
+        result = await session.execute(
+            select(Merchant)
+            .join(BenefitGroupBinding, BenefitGroupBinding.merchant_id == Merchant.id)
+            .where(BenefitGroupBinding.benefit_chat_id == benefit_chat_id)
+        )
+        return list(result.scalars().all())
 
 
 class MerchantService:
@@ -185,10 +236,11 @@ class LedgerService:
         settle_fee_rate: Decimal,
         dividend_rate: Decimal,
         default_u_rate: Decimal,
-    ) -> SettlementResult:
+    ) -> tuple[SettlementResult, Decimal | None]:
         actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
         result = FinanceService.calculate_settlement(gross_amount_cents, settle_fee_rate)
         merchant.balance += result.net_amount_cents
+        dividend_usdt_added: Decimal | None = None
         if dividend_rate > 0:
             div_cents = int(
                 (Decimal(result.net_amount_cents) * dividend_rate).quantize(
@@ -200,6 +252,7 @@ class LedgerService:
                 m_u = FinanceService.merchant_u_rate(actual_u)
                 delta_usdt = MoneyService.cents_to_decimal(div_cents) / m_u
                 merchant.benefit_balance = Decimal(merchant.benefit_balance) + delta_usdt
+                dividend_usdt_added = delta_usdt
         session.add(
             Transaction(
                 merchant_id=merchant.id,
@@ -210,7 +263,7 @@ class LedgerService:
         )
         await session.commit()
         await session.refresh(merchant)
-        return result
+        return result, dividend_usdt_added
 
     @staticmethod
     async def payout(
