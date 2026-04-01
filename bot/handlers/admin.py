@@ -173,28 +173,27 @@ def build_admin_router(
             if locked is None:
                 await message.answer("未找到对应商户。")
                 return
-            report_data = await ReportService.build_daily_report(session, locked)
+            snapshot = await ReportService.build_last_txn_snapshot(session, locked.id)
             await session.refresh(locked)
             balance_before = locked.balance
 
             actual_u = await SystemConfigService.peek_u_rate(session, default_u_rate)
             merchant_u = FinanceService.merchant_u_rate(actual_u)
             settle_fee = await SystemConfigService.peek_settle_fee_rate(session, default_settle_fee_rate)
-            settle_net_today = report_data.settle_amount_cents - report_data.settle_fee_cents
 
             merchant_text = format_merchant_group_report(
-                settle_gross_cents=report_data.settle_amount_cents,
-                settle_fee_cents=report_data.settle_fee_cents,
+                settle_gross_cents=snapshot.settle_gross_cents,
+                settle_fee_cents=snapshot.settle_fee_cents,
                 settle_fee_rate=settle_fee,
-                settle_net_today_cents=settle_net_today,
-                payout_principal_cents=report_data.payout_amount_cents,
+                settle_net_cents=snapshot.settle_net_cents,
+                payout_principal_cents=snapshot.payout_principal_cents,
                 closing_balance_cents=balance_before,
                 merchant_u_rate=merchant_u,
             )
             admin_text = format_admin_group_report(
-                settle_gross_cents=report_data.settle_amount_cents,
-                payout_principal_cents=report_data.payout_amount_cents,
-                payout_fee_cents=report_data.payout_fee_cents,
+                settle_gross_cents=snapshot.settle_gross_cents,
+                payout_principal_cents=snapshot.payout_principal_cents,
+                payout_fee_cents=snapshot.payout_fee_cents,
                 actual_u_rate=actual_u,
             )
             locked.balance = 0

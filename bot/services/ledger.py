@@ -3,10 +3,9 @@ from __future__ import annotations
 import secrets
 import string
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import BenefitGroupBinding, Merchant, SystemConfig, Transaction
@@ -23,13 +22,13 @@ def merchant_display(merchant: Merchant) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class DailyReport:
-    merchant: Merchant
-    settle_count: int
-    settle_amount_cents: int
+class LastTxnReportSnapshot:
+    """最近一次结算、最近一次代付（各一笔），非当日累计。"""
+
+    settle_gross_cents: int
     settle_fee_cents: int
-    payout_count: int
-    payout_amount_cents: int
+    settle_net_cents: int
+    payout_principal_cents: int
     payout_fee_cents: int
 
 
@@ -289,36 +288,37 @@ class LedgerService:
 
 class ReportService:
     @staticmethod
-    async def build_daily_report(
+    async def build_last_txn_snapshot(
         session: AsyncSession,
-        merchant: Merchant,
-        now: datetime | None = None,
-    ) -> DailyReport:
-        current_time = now or datetime.now(timezone.utc)
-        day_start = datetime.combine(current_time.date(), time.min, tzinfo=current_time.tzinfo)
-        day_end = day_start + timedelta(days=1)
-
-        rows = await session.execute(
-            select(
-                Transaction.tx_type,
-                func.count(Transaction.id),
-                func.coalesce(func.sum(Transaction.amount), 0),
-                func.coalesce(func.sum(Transaction.fee), 0),
-            )
-            .where(Transaction.merchant_id == merchant.id)
-            .where(Transaction.created_at >= day_start)
-            .where(Transaction.created_at < day_end)
-            .group_by(Transaction.tx_type)
+        merchant_id: int,
+    ) -> LastTxnReportSnapshot:
+        r_settle = await session.execute(
+            select(Transaction)
+            .where(Transaction.merchant_id == merchant_id, Transaction.tx_type == "settle")
+            .order_by(desc(Transaction.created_at))
+            .limit(1)
         )
-        summary = {tx_type: (count, amount, fee) for tx_type, count, amount, fee in rows.all()}
-        settle_count, settle_amount, settle_fee = summary.get("settle", (0, 0, 0))
-        payout_count, payout_amount, payout_fee = summary.get("payout", (0, 0, 0))
-        return DailyReport(
-            merchant=merchant,
-            settle_count=int(settle_count),
-            settle_amount_cents=int(settle_amount),
-            settle_fee_cents=int(settle_fee),
-            payout_count=int(payout_count),
-            payout_amount_cents=int(payout_amount),
-            payout_fee_cents=int(payout_fee),
+        st = r_settle.scalar_one_or_none()
+        r_payout = await session.execute(
+            select(Transaction)
+            .where(Transaction.merchant_id == merchant_id, Transaction.tx_type == "payout")
+            .order_by(desc(Transaction.created_at))
+            .limit(1)
+        )
+        pt = r_payout.scalar_one_or_none()
+        sg, sf, sn = 0, 0, 0
+        if st is not None:
+            sg = int(st.amount)
+            sf = int(st.fee)
+            sn = sg - sf
+        pp, pf = 0, 0
+        if pt is not None:
+            pp = int(pt.amount)
+            pf = int(pt.fee)
+        return LastTxnReportSnapshot(
+            settle_gross_cents=sg,
+            settle_fee_cents=sf,
+            settle_net_cents=sn,
+            payout_principal_cents=pp,
+            payout_fee_cents=pf,
         )
