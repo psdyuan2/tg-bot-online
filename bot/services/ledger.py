@@ -4,16 +4,18 @@ import secrets
 import string
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Merchant, SystemConfig, Transaction
-from bot.services.finance import FinanceService, PayoutResult, SettlementResult
+from bot.services.finance import FinanceService, MoneyService, PayoutResult, SettlementResult
 
 
 U_RATE_KEY = "U_RATE"
+SETTLE_FEE_RATE_KEY = "SETTLE_FEE_RATE"
+DIVIDEND_RATE_KEY = "DIVIDEND_RATE"
 
 
 def merchant_display(merchant: Merchant) -> str:
@@ -47,6 +49,48 @@ class SystemConfigService:
         record = await session.get(SystemConfig, U_RATE_KEY)
         if record is None:
             record = SystemConfig(key=U_RATE_KEY, value=str(rate))
+            session.add(record)
+        else:
+            record.value = str(rate)
+        await session.commit()
+        return rate
+
+    @staticmethod
+    async def get_settle_fee_rate(session: AsyncSession, default_rate: Decimal) -> Decimal:
+        record = await session.get(SystemConfig, SETTLE_FEE_RATE_KEY)
+        if record is None:
+            record = SystemConfig(key=SETTLE_FEE_RATE_KEY, value=str(default_rate))
+            session.add(record)
+            await session.commit()
+            return default_rate
+        return Decimal(record.value)
+
+    @staticmethod
+    async def set_settle_fee_rate(session: AsyncSession, rate: Decimal) -> Decimal:
+        record = await session.get(SystemConfig, SETTLE_FEE_RATE_KEY)
+        if record is None:
+            record = SystemConfig(key=SETTLE_FEE_RATE_KEY, value=str(rate))
+            session.add(record)
+        else:
+            record.value = str(rate)
+        await session.commit()
+        return rate
+
+    @staticmethod
+    async def get_dividend_rate(session: AsyncSession, default_rate: Decimal) -> Decimal:
+        record = await session.get(SystemConfig, DIVIDEND_RATE_KEY)
+        if record is None:
+            record = SystemConfig(key=DIVIDEND_RATE_KEY, value=str(default_rate))
+            session.add(record)
+            await session.commit()
+            return default_rate
+        return Decimal(record.value)
+
+    @staticmethod
+    async def set_dividend_rate(session: AsyncSession, rate: Decimal) -> Decimal:
+        record = await session.get(SystemConfig, DIVIDEND_RATE_KEY)
+        if record is None:
+            record = SystemConfig(key=DIVIDEND_RATE_KEY, value=str(rate))
             session.add(record)
         else:
             record.value = str(rate)
@@ -95,6 +139,7 @@ class MerchantService:
                 merchant_code=code,
                 tg_chat_id=chat_id,
                 balance=0,
+                benefit_balance=Decimal("0"),
             )
         )
         await session.commit()
@@ -136,9 +181,25 @@ class LedgerService:
         session: AsyncSession,
         merchant: Merchant,
         gross_amount_cents: int,
+        *,
+        settle_fee_rate: Decimal,
+        dividend_rate: Decimal,
+        default_u_rate: Decimal,
     ) -> SettlementResult:
-        result = FinanceService.calculate_settlement(gross_amount_cents)
+        actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
+        result = FinanceService.calculate_settlement(gross_amount_cents, settle_fee_rate)
         merchant.balance += result.net_amount_cents
+        if dividend_rate > 0:
+            div_cents = int(
+                (Decimal(result.net_amount_cents) * dividend_rate).quantize(
+                    Decimal("1"),
+                    rounding=ROUND_HALF_UP,
+                )
+            )
+            if div_cents > 0:
+                m_u = FinanceService.merchant_u_rate(actual_u)
+                delta_usdt = MoneyService.cents_to_decimal(div_cents) / m_u
+                merchant.benefit_balance = Decimal(merchant.benefit_balance) + delta_usdt
         session.add(
             Transaction(
                 merchant_id=merchant.id,

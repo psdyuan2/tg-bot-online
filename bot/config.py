@@ -11,8 +11,11 @@ from dotenv import load_dotenv
 class Settings:
     admin_bot_token: str
     notify_bot_token: str
+    benefit_bot_token: str
     database_url: str
     default_u_rate: Decimal
+    default_settle_fee_rate: Decimal
+    default_dividend_rate: Decimal
 
 
 def _load_env() -> None:
@@ -32,14 +35,18 @@ def load_settings() -> Settings:
 
     admin_bot_token = os.getenv("ADMIN_BOT_TOKEN", "").strip()
     notify_bot_token = os.getenv("NOTIFY_BOT_TOKEN", "").strip()
+    benefit_bot_token = os.getenv("BENEFIT_BOT_TOKEN", "").strip()
     database_url = load_database_url()
 
-    if not admin_bot_token or not notify_bot_token:
-        raise ValueError("ADMIN_BOT_TOKEN and NOTIFY_BOT_TOKEN are required.")
+    if not admin_bot_token or not notify_bot_token or not benefit_bot_token:
+        raise ValueError("ADMIN_BOT_TOKEN, NOTIFY_BOT_TOKEN and BENEFIT_BOT_TOKEN are required.")
 
     return Settings(
         admin_bot_token=admin_bot_token,
         notify_bot_token=notify_bot_token,
+        benefit_bot_token=benefit_bot_token,
         database_url=database_url,
         default_u_rate=Decimal(os.getenv("DEFAULT_U_RATE", "7.20")),
+        default_settle_fee_rate=Decimal(os.getenv("DEFAULT_SETTLE_FEE_RATE", "0.065")),
+        default_dividend_rate=Decimal(os.getenv("DEFAULT_DIVIDEND_RATE", "0.01")),
     )

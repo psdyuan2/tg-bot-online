@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -22,6 +24,7 @@ async def test_get_by_identifier_resolves_merchant_code_case_insensitive() -> No
                 merchant_code="ab12cd34",
                 tg_chat_id=-100,
                 balance=0,
+                benefit_balance=Decimal("0"),
             )
         )
         await session.commit()
@@ -38,8 +41,15 @@ def test_merchant_display_prefers_code() -> None:
         merchant_code="abc12345",
         tg_chat_id=1,
         balance=0,
+        benefit_balance=Decimal("0"),
     )
     assert merchant_display(m) == "abc12345"
 
-    m2 = Merchant(merchant_name="legacy", merchant_code=None, tg_chat_id=2, balance=0)
+    m2 = Merchant(
+        merchant_name="legacy",
+        merchant_code=None,
+        tg_chat_id=2,
+        balance=0,
+        benefit_balance=Decimal("0"),
+    )
     assert merchant_display(m2) == "legacy"

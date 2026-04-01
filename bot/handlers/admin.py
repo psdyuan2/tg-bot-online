@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from aiogram import Bot, Router
@@ -8,8 +9,13 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from bot.handlers.common import parse_decimal_arg, split_command_args
-from bot.services.finance import MoneyService
+from bot.db.models import Merchant
+from bot.handlers.common import (
+    parse_decimal_arg,
+    parse_fee_rate_arg,
+    split_command_args,
+)
+from bot.services.finance import FinanceService, MoneyService
 from bot.services.ledger import (
     LedgerService,
     MerchantService,
@@ -17,12 +23,15 @@ from bot.services.ledger import (
     SystemConfigService,
     merchant_display,
 )
+from bot.services.report_text import format_admin_group_report, format_merchant_group_report
 
 
 def build_admin_router(
     session_factory: async_sessionmaker[AsyncSession],
     notify_bot: Bot,
     default_u_rate: Decimal,
+    default_settle_fee_rate: Decimal,
+    default_dividend_rate: Decimal,
 ) -> Router:
     router = Router(name="admin")
 
@@ -30,7 +39,7 @@ def build_admin_router(
     async def set_u_rate(message: Message) -> None:
         args = split_command_args(message.text or "")
         if len(args) != 1:
-            await message.answer("用法: /uset [汇率]")
+            await message.answer("用法: /uset [实际U价]")
             return
 
         try:
@@ -42,13 +51,30 @@ def build_admin_router(
         async with session_factory() as session:
             await SystemConfigService.set_u_rate(session, u_rate)
 
-        await message.answer(f"U 价已更新为: {u_rate}")
+        await message.answer(f"实际 U 价已更新为: {u_rate}")
+
+    @router.message(Command(commands=["set_payout_fit"]))
+    async def set_settle_fee_rate(message: Message) -> None:
+        args = split_command_args(message.text or "")
+        if len(args) != 1:
+            await message.answer("用法: /set_payout_fit [结算入账服务费率]\n例如 6.5 或 0.065 表示 6.5%。")
+            return
+        try:
+            rate = parse_fee_rate_arg(args[0])
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+        async with session_factory() as session:
+            await SystemConfigService.set_settle_fee_rate(session, rate)
+        await message.answer(f"结算入账服务费率已设为: {rate}（{rate * Decimal(100)}%）")
 
     @router.message(Command(commands=["settle"]))
     async def settle(message: Message) -> None:
         args = split_command_args(message.text or "")
         if len(args) != 2:
-            await message.answer("用法: /settle [商户标识] [金额]\n商户标识为商户群内 /add_id 生成的短码，或历史商户名 / 数字 id。")
+            await message.answer(
+                "用法: /settle [商户标识] [金额]\n商户标识为商户群内 /add_id 生成的短码，或历史商户名 / 数字 id。"
+            )
             return
 
         merchant_identifier, raw_amount = args
@@ -58,18 +84,30 @@ def build_admin_router(
             await message.answer(str(exc))
             return
 
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
         async with session_factory() as session:
             merchant = await MerchantService.get_by_identifier(session, merchant_identifier)
             if merchant is None:
                 await message.answer("未找到对应商户，请确认商户群内已执行 /add_id 或数据库中已有该商户。")
                 return
 
-            result = await LedgerService.settle(session, merchant, gross_amount_cents)
+            settle_fee = await SystemConfigService.get_settle_fee_rate(session, default_settle_fee_rate)
+            dividend_rate = await SystemConfigService.get_dividend_rate(session, default_dividend_rate)
+            result = await LedgerService.settle(
+                session,
+                merchant,
+                gross_amount_cents,
+                settle_fee_rate=settle_fee,
+                dividend_rate=dividend_rate,
+                default_u_rate=default_u_rate,
+            )
 
         label = merchant_display(merchant)
         await message.answer(
             "\n".join(
                 [
+                    f"时间: {now}",
                     f"商户: {label}",
                     f"结算金额: {MoneyService.format_cents(result.gross_amount_cents)}",
                     f"服务佣金: {MoneyService.format_cents(result.fee_cents)}",
@@ -83,6 +121,7 @@ def build_admin_router(
             chat_id=merchant.tg_chat_id,
             text="\n".join(
                 [
+                    f"时间: {now}",
                     "收到新的结算入账通知。",
                     f"商户: {label}",
                     f"结算金额: {MoneyService.format_cents(result.gross_amount_cents)}",
@@ -97,7 +136,9 @@ def build_admin_router(
     async def report(message: Message) -> None:
         args = split_command_args(message.text or "")
         if len(args) != 1:
-            await message.answer("用法: /report [商户标识]\n商户标识为商户群内 /add_id 生成的短码，或历史商户名 / 数字 id。")
+            await message.answer(
+                "用法: /report [商户标识]\n商户标识为商户群内 /add_id 生成的短码，或历史商户名 / 数字 id。"
+            )
             return
 
         async with session_factory() as session:
@@ -105,29 +146,36 @@ def build_admin_router(
             if merchant is None:
                 await message.answer("未找到对应商户。")
                 return
-            report_data = await ReportService.build_daily_report(session, merchant)
-            u_rate = await SystemConfigService.get_u_rate(session, default_u_rate)
+            locked = await session.get(Merchant, merchant.id, with_for_update=True)
+            if locked is None:
+                await message.answer("未找到对应商户。")
+                return
+            report_data = await ReportService.build_daily_report(session, locked)
+            actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
+            merchant_u = FinanceService.merchant_u_rate(actual_u)
+            settle_fee = await SystemConfigService.get_settle_fee_rate(session, default_settle_fee_rate)
+            balance_before = locked.balance
 
-        usdt_estimate = MoneyService.format_decimal(
-            value=(MoneyService.cents_to_decimal(merchant.balance) / u_rate),
-        )
-        label = merchant_display(merchant)
-        report_text = "\n".join(
-            [
-                f"商户对账单: {label}",
-                f"今日结算笔数: {report_data.settle_count}",
-                f"今日结算金额: {MoneyService.format_cents(report_data.settle_amount_cents)}",
-                f"今日结算佣金: {MoneyService.format_cents(report_data.settle_fee_cents)}",
-                f"今日代付笔数: {report_data.payout_count}",
-                f"今日代付金额: {MoneyService.format_cents(report_data.payout_amount_cents)}",
-                f"今日代付手续费: {MoneyService.format_cents(report_data.payout_fee_cents)}",
-                f"当前余额: {MoneyService.format_cents(merchant.balance)}",
-                f"按当前 U 价预估可回 U: {usdt_estimate}",
-            ]
-        )
-        await message.answer(report_text)
+            merchant_text = format_merchant_group_report(
+                settle_gross_cents=report_data.settle_amount_cents,
+                settle_fee_cents=report_data.settle_fee_cents,
+                settle_fee_rate=settle_fee,
+                payout_principal_cents=report_data.payout_amount_cents,
+                balance_cents=balance_before,
+                merchant_u_rate=merchant_u,
+            )
+            admin_text = format_admin_group_report(
+                settle_gross_cents=report_data.settle_amount_cents,
+                payout_principal_cents=report_data.payout_amount_cents,
+                payout_fee_cents=report_data.payout_fee_cents,
+                actual_u_rate=actual_u,
+            )
+            locked.balance = 0
+            await session.commit()
+
+        await message.answer(admin_text)
         try:
-            await notify_bot.send_message(chat_id=merchant.tg_chat_id, text=report_text)
+            await notify_bot.send_message(chat_id=merchant.tg_chat_id, text=merchant_text)
         except TelegramForbiddenError:
             await message.answer("对账单已生成，但未能发送到商户群（请确认通知机器人已在群内且未被禁言）。")
 

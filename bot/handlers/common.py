@@ -28,3 +28,31 @@ def parse_decimal_arg(raw_value: str) -> Decimal:
     if value <= 0:
         raise ValueError("参数必须大于 0。")
     return value
+
+
+def parse_fee_rate_arg(raw_value: str) -> Decimal:
+    try:
+        value = Decimal(raw_value.strip())
+    except InvalidOperation as exc:
+        raise ValueError("参数格式不正确。") from exc
+    if value < 0:
+        raise ValueError("费率不能为负。")
+    if value > 1:
+        value = value / Decimal(100)
+    if value >= 1:
+        raise ValueError("费率必须小于 100%。")
+    return value
+
+
+def parse_dividend_rate_arg(raw_value: str) -> Decimal:
+    try:
+        value = Decimal(raw_value.strip())
+    except InvalidOperation as exc:
+        raise ValueError("参数格式不正确。") from exc
+    if value < 0:
+        raise ValueError("分红率不能为负。")
+    if value >= 1:
+        value = value / Decimal(100)
+    if value > 1:
+        raise ValueError("分红率不能大于 100%。")
+    return value

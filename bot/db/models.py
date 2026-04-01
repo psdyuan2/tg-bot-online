@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Uuid, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.db.base import Base
@@ -35,6 +36,12 @@ class Merchant(Base):
     )
     tg_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
     balance: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    benefit_balance: Mapped[Decimal] = mapped_column(
+        Numeric(24, 8),
+        nullable=False,
+        default=Decimal("0"),
+        server_default="0",
+    )
 
     transactions: Mapped[list[Transaction]] = relationship(
         back_populates="merchant",

@@ -6,8 +6,12 @@ from decimal import Decimal, ROUND_HALF_UP
 
 
 CENT_FACTOR = Decimal("100")
-SETTLEMENT_RATE = Decimal("0.935")
-PAYOUT_RATE = Decimal("1.01")
+BANK_FEE_RATE = Decimal("0.015")
+PAYOUT_SERVICE_RATE = Decimal("0.01")
+ACTUAL_ARRIVAL_FACTOR = Decimal("0.985")
+DEBIT_FACTOR = Decimal("1.01")
+MERCHANT_U_MARKUP = Decimal("0.5")
+SKY_GATEWAY_RATE = Decimal("0.04")
 TWO_PLACES = Decimal("0.01")
 
 
@@ -29,6 +33,9 @@ class SettlementResult:
 @dataclass(frozen=True, slots=True)
 class PayoutResult:
     principal_cents: int
+    bank_fee_cents: int
+    service_commission_cents: int
+    actual_arrival_cents: int
     fee_cents: int
     debit_cents: int
 
@@ -62,14 +69,23 @@ class MoneyService:
     def format_decimal(value: Decimal, places: str = "0.000000") -> str:
         return f"{value.quantize(Decimal(places), rounding=ROUND_HALF_UP):,}"
 
+    @staticmethod
+    def format_usdt_balance(value: Decimal) -> str:
+        return f"{value.quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP):,.8f}"
+
 
 class FinanceService:
     @staticmethod
-    def calculate_settlement(gross_amount_cents: int) -> SettlementResult:
-        net_amount = (Decimal(gross_amount_cents) * SETTLEMENT_RATE).quantize(
-            Decimal("1"),
-            rounding=ROUND_HALF_UP,
-        )
+    def merchant_u_rate(actual_u_rate: Decimal) -> Decimal:
+        return actual_u_rate + MERCHANT_U_MARKUP
+
+    @staticmethod
+    def calculate_settlement(gross_amount_cents: int, settle_fee_rate: Decimal) -> SettlementResult:
+        if settle_fee_rate < 0 or settle_fee_rate >= 1:
+            raise ValueError("结算服务费率必须在 [0, 1) 内。")
+        net_amount = (
+            Decimal(gross_amount_cents) * (Decimal(1) - settle_fee_rate)
+        ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         net_amount_cents = int(net_amount)
         fee_cents = gross_amount_cents - net_amount_cents
         return SettlementResult(
@@ -80,15 +96,17 @@ class FinanceService:
 
     @staticmethod
     def calculate_payout(principal_cents: int) -> PayoutResult:
-        debit_amount = (Decimal(principal_cents) * PAYOUT_RATE).quantize(
-            Decimal("1"),
-            rounding=ROUND_HALF_UP,
-        )
-        debit_cents = int(debit_amount)
-        fee_cents = debit_cents - principal_cents
+        p = Decimal(principal_cents)
+        bank_fee_cents = int((p * BANK_FEE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        service_commission_cents = int((p * PAYOUT_SERVICE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        actual_arrival_cents = int((p * ACTUAL_ARRIVAL_FACTOR).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        debit_cents = int((p * DEBIT_FACTOR).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
         return PayoutResult(
             principal_cents=principal_cents,
-            fee_cents=fee_cents,
+            bank_fee_cents=bank_fee_cents,
+            service_commission_cents=service_commission_cents,
+            actual_arrival_cents=actual_arrival_cents,
+            fee_cents=service_commission_cents,
             debit_cents=debit_cents,
         )
 

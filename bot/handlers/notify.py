@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from aiogram import Router
@@ -43,8 +44,9 @@ def build_notify_router(
     @router.message(Command(commands=["u"]))
     async def show_u_rate(message: Message) -> None:
         async with session_factory() as session:
-            u_rate = await SystemConfigService.get_u_rate(session, default_u_rate)
-        await message.answer(f"今日u价 {u_rate}")
+            actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
+        merchant_u = FinanceService.merchant_u_rate(actual_u)
+        await message.answer(f"今日u价 {merchant_u}")
 
     @router.message(Command(commands=["payout"]))
     async def payout(message: Message) -> None:
@@ -59,12 +61,17 @@ def build_notify_router(
             await message.answer(str(exc))
             return
 
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
         chat = message.chat
         async with session_factory() as session:
             merchant = await MerchantService.get_by_chat_id_for_update(session, chat.id)
             if merchant is None:
                 await message.answer("当前群组未绑定商户，请先在群内使用 /add_id 创建商户标识。")
                 return
+
+            actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
+            merchant_u = FinanceService.merchant_u_rate(actual_u)
 
             try:
                 result = await LedgerService.payout(session, merchant, principal_cents)
@@ -73,13 +80,18 @@ def build_notify_router(
                 await message.answer(str(exc))
                 return
 
+        usdt = FinanceService.calculate_usdt(merchant.balance, merchant_u)
+
         await message.answer(
             "\n".join(
                 [
-                    f"代付申请金额: {MoneyService.format_cents(result.principal_cents)}",
-                    f"预留手续费: {MoneyService.format_cents(result.fee_cents)}",
-                    f"实际扣款: {MoneyService.format_cents(result.debit_cents)}",
-                    f"最新余额: {MoneyService.format_cents(merchant.balance)}",
+                    f"当前时间: {now}",
+                    f"申请代付金额: {MoneyService.format_cents(result.principal_cents)}",
+                    f"银行手续费（1.5%）: {MoneyService.format_cents(result.bank_fee_cents)}",
+                    f"服务佣金（1%）: {MoneyService.format_cents(result.service_commission_cents)}",
+                    f"实际代付到账: {MoneyService.format_cents(result.actual_arrival_cents)}",
+                    f"当前可用余额: {MoneyService.format_cents(merchant.balance)}",
+                    f"可回U: {MoneyService.format_decimal(usdt)} USDT（商户U价 {merchant_u}）",
                 ]
             )
         )
@@ -98,14 +110,15 @@ def build_notify_router(
             return
 
         async with session_factory() as session:
-            u_rate = await SystemConfigService.get_u_rate(session, default_u_rate)
+            actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
+        merchant_u = FinanceService.merchant_u_rate(actual_u)
 
-        usdt_amount = FinanceService.calculate_usdt(balance_cents, u_rate)
+        usdt_amount = FinanceService.calculate_usdt(balance_cents, merchant_u)
         await message.answer(
             "\n".join(
                 [
                     f"输入金额: {MoneyService.format_cents(balance_cents)}",
-                    f"当前 U 价: {u_rate}",
+                    f"商户 U 价: {merchant_u}",
                     f"预估下发 USDT: {MoneyService.format_decimal(usdt_amount)}",
                 ]
             )
