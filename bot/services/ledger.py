@@ -5,7 +5,7 @@ import string
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import Select, and_, desc, func, or_, select
+from sqlalchemy import Boolean, Select, and_, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import BenefitGroupBinding, Merchant, SystemConfig, Transaction
@@ -271,6 +271,7 @@ class LedgerService:
                 tx_type="settle",
                 amount=result.gross_amount_cents,
                 fee=result.fee_cents,
+                is_reported=False,
             )
         )
         await session.commit()
@@ -292,6 +293,7 @@ class LedgerService:
                 tx_type="payout",
                 amount=result.principal_cents,
                 fee=result.fee_cents,
+                is_reported=False,
             )
         )
         await session.commit()
@@ -305,6 +307,10 @@ class ReportService:
         session: AsyncSession,
         merchant_id: int,
     ) -> UnreconciledReportSnapshot:
+        unreported = and_(
+            Transaction.merchant_id == merchant_id,
+            Transaction.is_reported == False,
+        )
         rows = await session.execute(
             select(
                 Transaction.tx_type,
@@ -312,12 +318,15 @@ class ReportService:
                 func.coalesce(func.sum(Transaction.amount), 0),
                 func.coalesce(func.sum(Transaction.fee), 0),
             )
-            .where(Transaction.merchant_id == merchant_id)
+            .where(unreported)
             .group_by(Transaction.tx_type)
         )
         summary = {tx_type: (int(count), int(amount), int(fee)) for tx_type, count, amount, fee in rows.all()}
         sc, sg, sf = summary.get("settle", (0, 0, 0))
         pc, pp, pf = summary.get("payout", (0, 0, 0))
+        await session.execute(
+            update(Transaction).where(unreported).values(is_reported=True)
+        )
         return UnreconciledReportSnapshot(
             settle_count=sc,
             settle_gross_cents=sg,

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, Uuid, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.db.base import Base
@@ -80,6 +80,7 @@ class Transaction(Base):
     tx_type: Mapped[str] = mapped_column(String(32), nullable=False)
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     fee: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    is_reported: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
