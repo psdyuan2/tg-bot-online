@@ -23,7 +23,7 @@ from bot.services.ledger import (
     SystemConfigService,
     merchant_display,
 )
-from bot.services.report_text import format_unreconciled_report
+from bot.services.report_text import format_merchant_report, format_unreconciled_report
 
 
 def build_admin_router(
@@ -194,9 +194,20 @@ def build_admin_router(
                 closing_balance_cents=balance_before,
                 actual_u_rate=actual_u,
             )
+            merchant_text = format_merchant_report(
+                settle_gross_cents=snapshot.settle_gross_cents,
+                settle_fee_cents=snapshot.settle_fee_cents,
+                settle_fee_rate=settle_fee,
+                settle_net_cents=snapshot.settle_net_cents,
+                payout_principal_cents=snapshot.payout_principal_cents,
+                payout_fee_cents=snapshot.payout_fee_cents,
+                closing_balance_cents=balance_before,
+                actual_u_rate=actual_u,
+            )
             locked.balance = 0
             await session.commit()
 
         await message.answer(report_text)
+        await message.answer(merchant_text)
 
     return router
