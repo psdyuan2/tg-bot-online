@@ -237,6 +237,22 @@ class MerchantService:
         )
         return result.scalar_one_or_none()
 
+    @staticmethod
+    async def reset_merchant_code(session: AsyncSession, chat_id: int, new_code: str) -> tuple[bool, str]:
+        merchant = await MerchantService.get_by_chat_id(session, chat_id)
+        if merchant is None:
+            return False, "本群未注册商户，请先使用 /add_id 创建商户。"
+        if merchant.merchant_code == new_code:
+            return False, f"本群商户标识已是 {new_code}，无需修改。"
+        existing = await session.execute(
+            select(Merchant.id).where(Merchant.merchant_code == new_code).limit(1)
+        )
+        if existing.scalar_one_or_none() is not None:
+            return False, f"商户标识 {new_code} 已被其他群使用，请换一个。"
+        merchant.merchant_code = new_code
+        await session.commit()
+        return True, f"商户标识已更新为: {new_code}"
+
 
 class LedgerService:
     @staticmethod

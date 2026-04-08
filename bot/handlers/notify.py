@@ -41,6 +41,23 @@ def build_notify_router(
             return
         await message.answer(f"本群商户标识: {merchant.merchant_code}")
 
+    @router.message(Command(commands=["set_id"]))
+    async def reset_merchant_id(message: Message) -> None:
+        args = split_command_args(message.text or "")
+        if len(args) != 1:
+            await message.answer("用法: /set_id [新短码]")
+            return
+        new_code = args[0].strip().lower()
+        if not new_code:
+            await message.answer("短码不能为空。")
+            return
+        if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+            await message.answer("请在商户群组内使用此命令。")
+            return
+        async with session_factory() as session:
+            ok, text = await MerchantService.reset_merchant_code(session, message.chat.id, new_code)
+        await message.answer(text)
+
     @router.message(Command(commands=["u"]))
     async def show_u_rate(message: Message) -> None:
         async with session_factory() as session:
