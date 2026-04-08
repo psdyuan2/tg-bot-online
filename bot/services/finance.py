@@ -33,10 +33,10 @@ class SettlementResult:
 @dataclass(frozen=True, slots=True)
 class PayoutResult:
     principal_cents: int
+    transfer_amount_cents: int
     bank_fee_cents: int
     service_commission_cents: int
     actual_arrival_cents: int
-    fee_cents: int
     debit_cents: int
 
 
@@ -97,16 +97,19 @@ class FinanceService:
     @staticmethod
     def calculate_payout(principal_cents: int) -> PayoutResult:
         p = Decimal(principal_cents)
-        bank_fee_cents = int((p * BANK_FEE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
         service_commission_cents = int((p * PAYOUT_SERVICE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-        actual_arrival_cents = int((p * ACTUAL_ARRIVAL_FACTOR).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-        debit_cents = int((p * DEBIT_FACTOR).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        transfer_amount_cents = principal_cents - service_commission_cents
+        bank_fee_cents = int(
+            (Decimal(transfer_amount_cents) * BANK_FEE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+        actual_arrival_cents = transfer_amount_cents - bank_fee_cents
+        debit_cents = principal_cents
         return PayoutResult(
             principal_cents=principal_cents,
+            transfer_amount_cents=transfer_amount_cents,
             bank_fee_cents=bank_fee_cents,
             service_commission_cents=service_commission_cents,
             actual_arrival_cents=actual_arrival_cents,
-            fee_cents=service_commission_cents,
             debit_cents=debit_cents,
         )
 

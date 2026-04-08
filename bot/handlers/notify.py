@@ -87,8 +87,9 @@ def build_notify_router(
                 await message.answer("当前群组未绑定商户，请先在群内使用 /add_id 创建商户标识。")
                 return
 
-            actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
-            merchant_u = FinanceService.merchant_u_rate(actual_u)
+            if principal_cents > merchant.balance:
+                await message.answer(f"申请金额 {MoneyService.format_cents(principal_cents)} 超过当前余额 {MoneyService.format_cents(merchant.balance)}，无法完成代付。")
+                return
 
             try:
                 result = await LedgerService.payout(session, merchant, principal_cents)
@@ -97,18 +98,19 @@ def build_notify_router(
                 await message.answer(str(exc))
                 return
 
-        usdt = FinanceService.calculate_usdt(merchant.balance, merchant_u)
+        usdt = FinanceService.calculate_usdt(merchant.balance, FinanceService.merchant_u_rate(default_u_rate))
 
         await message.answer(
             "\n".join(
                 [
                     f"当前时间: {now}",
-                    f"申请代付金额: {MoneyService.format_cents(result.principal_cents)}",
-                    f"银行手续费（1.5%）: {MoneyService.format_cents(result.bank_fee_cents)}",
+                    f"申请金额: {MoneyService.format_cents(result.principal_cents)}",
                     f"服务佣金（1%）: {MoneyService.format_cents(result.service_commission_cents)}",
-                    f"实际代付到账: {MoneyService.format_cents(result.actual_arrival_cents)}",
+                    f"转账金额: {MoneyService.format_cents(result.transfer_amount_cents)}",
+                    f"银行手续费（1.5%）: {MoneyService.format_cents(result.bank_fee_cents)}",
+                    f"实际到账: {MoneyService.format_cents(result.actual_arrival_cents)}",
                     f"当前可用余额: {MoneyService.format_cents(merchant.balance)}",
-                    f"可回U: {MoneyService.format_decimal(usdt)} USDT（商户U价 {merchant_u}）",
+                    f"可回U: {MoneyService.format_decimal(usdt)} USDT",
                 ]
             )
         )
