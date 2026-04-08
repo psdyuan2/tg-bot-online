@@ -32,6 +32,19 @@ class LastTxnReportSnapshot:
     payout_fee_cents: int
 
 
+@dataclass(frozen=True, slots=True)
+class UnreconciledReportSnapshot:
+    """所有流水汇总（不含代付，代付单独汇总）。"""
+
+    settle_count: int
+    settle_gross_cents: int
+    settle_fee_cents: int
+    settle_net_cents: int
+    payout_count: int
+    payout_principal_cents: int
+    payout_fee_cents: int
+
+
 class SystemConfigService:
     @staticmethod
     async def get_u_rate(session: AsyncSession, default_rate: Decimal) -> Decimal:
@@ -287,6 +300,34 @@ class LedgerService:
 
 
 class ReportService:
+    @staticmethod
+    async def build_unreconciled_snapshot(
+        session: AsyncSession,
+        merchant_id: int,
+    ) -> UnreconciledReportSnapshot:
+        rows = await session.execute(
+            select(
+                Transaction.tx_type,
+                func.count(Transaction.id),
+                func.coalesce(func.sum(Transaction.amount), 0),
+                func.coalesce(func.sum(Transaction.fee), 0),
+            )
+            .where(Transaction.merchant_id == merchant_id)
+            .group_by(Transaction.tx_type)
+        )
+        summary = {tx_type: (int(count), int(amount), int(fee)) for tx_type, count, amount, fee in rows.all()}
+        sc, sg, sf = summary.get("settle", (0, 0, 0))
+        pc, pp, pf = summary.get("payout", (0, 0, 0))
+        return UnreconciledReportSnapshot(
+            settle_count=sc,
+            settle_gross_cents=sg,
+            settle_fee_cents=sf,
+            settle_net_cents=sg - sf,
+            payout_count=pc,
+            payout_principal_cents=pp,
+            payout_fee_cents=pf,
+        )
+
     @staticmethod
     async def build_last_txn_snapshot(
         session: AsyncSession,

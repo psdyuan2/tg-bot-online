@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from aiogram import Bot, Router
-from aiogram.exceptions import TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
@@ -15,7 +14,7 @@ from bot.handlers.common import (
     parse_fee_rate_arg,
     split_command_args,
 )
-from bot.services.finance import FinanceService, MoneyService
+from bot.services.finance import MoneyService
 from bot.services.ledger import (
     BenefitBindingService,
     LedgerService,
@@ -24,7 +23,7 @@ from bot.services.ledger import (
     SystemConfigService,
     merchant_display,
 )
-from bot.services.report_text import format_admin_group_report, format_merchant_group_report
+from bot.services.report_text import format_unreconciled_report
 
 
 def build_admin_router(
@@ -173,36 +172,28 @@ def build_admin_router(
             if locked is None:
                 await message.answer("未找到对应商户。")
                 return
-            snapshot = await ReportService.build_last_txn_snapshot(session, locked.id)
+            snapshot = await ReportService.build_unreconciled_snapshot(session, locked.id)
             await session.refresh(locked)
             balance_before = locked.balance
 
             actual_u = await SystemConfigService.peek_u_rate(session, default_u_rate)
-            merchant_u = FinanceService.merchant_u_rate(actual_u)
             settle_fee = await SystemConfigService.peek_settle_fee_rate(session, default_settle_fee_rate)
 
-            merchant_text = format_merchant_group_report(
+            report_text = format_unreconciled_report(
+                settle_count=snapshot.settle_count,
                 settle_gross_cents=snapshot.settle_gross_cents,
                 settle_fee_cents=snapshot.settle_fee_cents,
                 settle_fee_rate=settle_fee,
                 settle_net_cents=snapshot.settle_net_cents,
-                payout_principal_cents=snapshot.payout_principal_cents,
-                closing_balance_cents=balance_before,
-                merchant_u_rate=merchant_u,
-            )
-            admin_text = format_admin_group_report(
-                settle_gross_cents=snapshot.settle_gross_cents,
+                payout_count=snapshot.payout_count,
                 payout_principal_cents=snapshot.payout_principal_cents,
                 payout_fee_cents=snapshot.payout_fee_cents,
+                closing_balance_cents=balance_before,
                 actual_u_rate=actual_u,
             )
             locked.balance = 0
             await session.commit()
 
-        await message.answer(admin_text)
-        try:
-            await notify_bot.send_message(chat_id=merchant.tg_chat_id, text=merchant_text)
-        except TelegramForbiddenError:
-            await message.answer("对账单已生成，但未能发送到商户群（请确认通知机器人已在群内且未被禁言）。")
+        await message.answer(report_text)
 
     return router
