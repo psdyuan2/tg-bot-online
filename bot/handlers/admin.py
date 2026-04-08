@@ -172,6 +172,7 @@ def build_admin_router(
             if locked is None:
                 await message.answer("未找到对应商户。")
                 return
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             snapshot = await ReportService.build_unreconciled_snapshot(session, locked.id)
             await session.refresh(locked)
             balance_before = locked.balance
@@ -180,6 +181,8 @@ def build_admin_router(
             settle_fee = await SystemConfigService.peek_settle_fee_rate(session, default_settle_fee_rate)
 
             report_text = format_unreconciled_report(
+                merchant_name=merchant_display(merchant),
+                report_date=today,
                 settle_count=snapshot.settle_count,
                 settle_gross_cents=snapshot.settle_gross_cents,
                 settle_fee_cents=snapshot.settle_fee_cents,
