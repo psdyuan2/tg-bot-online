@@ -98,19 +98,13 @@ def build_notify_router(
                 await message.answer(str(exc))
                 return
 
-        usdt = FinanceService.calculate_usdt(merchant.balance, FinanceService.merchant_u_rate(default_u_rate))
-
         await message.answer(
             "\n".join(
                 [
                     f"当前时间: {now}",
                     f"申请金额: {MoneyService.format_cents(result.principal_cents)}",
-                    f"服务佣金（1%）: {MoneyService.format_cents(result.service_commission_cents)}",
-                    f"转账金额: {MoneyService.format_cents(result.transfer_amount_cents)}",
-                    f"银行手续费（1.5%）: {MoneyService.format_cents(result.bank_fee_cents)}",
+                    f"2.5%网关手续费: {MoneyService.format_cents(result.gateway_fee_cents)}",
                     f"实际到账: {MoneyService.format_cents(result.actual_arrival_cents)}",
-                    f"当前可用余额: {MoneyService.format_cents(merchant.balance)}",
-                    f"可回U: {MoneyService.format_decimal(usdt)} USDT",
                 ]
             )
         )

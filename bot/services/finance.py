@@ -6,10 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 
 CENT_FACTOR = Decimal("100")
-BANK_FEE_RATE = Decimal("0.015")
-PAYOUT_SERVICE_RATE = Decimal("0.01")
-ACTUAL_ARRIVAL_FACTOR = Decimal("0.985")
-DEBIT_FACTOR = Decimal("1.01")
+GATEWAY_FEE_RATE = Decimal("0.025")
 MERCHANT_U_MARKUP = Decimal("0.5")
 SKY_GATEWAY_RATE = Decimal("0.04")
 TWO_PLACES = Decimal("0.01")
@@ -33,9 +30,7 @@ class SettlementResult:
 @dataclass(frozen=True, slots=True)
 class PayoutResult:
     principal_cents: int
-    transfer_amount_cents: int
-    bank_fee_cents: int
-    service_commission_cents: int
+    gateway_fee_cents: int
     actual_arrival_cents: int
     debit_cents: int
 
@@ -97,20 +92,13 @@ class FinanceService:
     @staticmethod
     def calculate_payout(principal_cents: int) -> PayoutResult:
         p = Decimal(principal_cents)
-        service_commission_cents = int((p * PAYOUT_SERVICE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-        transfer_amount_cents = principal_cents - service_commission_cents
-        bank_fee_cents = int(
-            (Decimal(transfer_amount_cents) * BANK_FEE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-        )
-        actual_arrival_cents = transfer_amount_cents - bank_fee_cents
-        debit_cents = principal_cents
+        gateway_fee_cents = int((p * GATEWAY_FEE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        actual_arrival_cents = principal_cents - gateway_fee_cents
         return PayoutResult(
             principal_cents=principal_cents,
-            transfer_amount_cents=transfer_amount_cents,
-            bank_fee_cents=bank_fee_cents,
-            service_commission_cents=service_commission_cents,
+            gateway_fee_cents=gateway_fee_cents,
             actual_arrival_cents=actual_arrival_cents,
-            debit_cents=debit_cents,
+            debit_cents=principal_cents,
         )
 
     @staticmethod

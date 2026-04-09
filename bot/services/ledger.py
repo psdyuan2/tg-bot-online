@@ -308,7 +308,7 @@ class LedgerService:
                 merchant_id=merchant.id,
                 tx_type="payout",
                 amount=result.principal_cents,
-                fee=result.service_commission_cents + result.bank_fee_cents,
+                fee=result.gateway_fee_cents,
                 is_reported=False,
             )
         )

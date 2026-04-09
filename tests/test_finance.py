@@ -29,14 +29,12 @@ def test_calculate_settlement_uses_configurable_fee() -> None:
     assert result.fee_cents == 6_500
 
 
-def test_calculate_payout_bank_and_service_and_debit() -> None:
+def test_calculate_payout_gateway_fee() -> None:
     result = FinanceService.calculate_payout(100_000)
 
     assert result.principal_cents == 100_000
-    assert result.service_commission_cents == 1_000
-    assert result.transfer_amount_cents == 99_000
-    assert result.bank_fee_cents == 1_485
-    assert result.actual_arrival_cents == 97_515
+    assert result.gateway_fee_cents == 2_500
+    assert result.actual_arrival_cents == 97_500
     assert result.debit_cents == 100_000
 
 
