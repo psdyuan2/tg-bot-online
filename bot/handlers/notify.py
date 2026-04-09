@@ -189,7 +189,7 @@ def build_notify_router(
             merchant_u = FinanceService.merchant_u_rate(actual_u)
 
         amount_decimal = MoneyService.cents_to_decimal(amount_cents)
-        usd = amount_decimal / merchant_u
+        usd = (amount_decimal / merchant_u).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
         await message.answer(
             "\n".join(
@@ -198,7 +198,7 @@ def build_notify_router(
                     f"商户: {merchant.merchant_code or merchant.name}",
                     f"申请打款金额: {MoneyService.format_cents(amount_cents)}",
                     f"今日u价: {merchant_u}",
-                    f"usd: {MoneyService.format_cents(amount_cents)}/{merchant_u}={MoneyService.format_decimal(usd)}",
+                    f"usd: {MoneyService.format_cents(amount_cents)}/{merchant_u}={int(usd)}",
                 ]
             )
         )
