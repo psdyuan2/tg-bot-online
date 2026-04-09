@@ -7,6 +7,10 @@ from decimal import Decimal, ROUND_HALF_UP
 
 CENT_FACTOR = Decimal("100")
 GATEWAY_FEE_RATE = Decimal("0.025")
+BANK_FEE_RATE = Decimal("0.015")
+PAYOUT_SERVICE_RATE = Decimal("0.01")
+ACTUAL_ARRIVAL_FACTOR = Decimal("0.985")
+DEBIT_FACTOR = Decimal("1.01")
 MERCHANT_U_MARKUP = Decimal("0.5")
 SKY_GATEWAY_RATE = Decimal("0.04")
 TWO_PLACES = Decimal("0.01")
