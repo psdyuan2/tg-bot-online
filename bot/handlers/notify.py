@@ -137,4 +137,70 @@ def build_notify_router(
             )
         )
 
+    @router.message(Command(commands=["balance"]))
+    async def show_balance(message: Message) -> None:
+        if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+            await message.answer("请在商户群组内使用此命令。")
+            return
+        async with session_factory() as session:
+            merchant = await MerchantService.get_by_chat_id(session, message.chat.id)
+        if merchant is None:
+            await message.answer("当前群组未绑定商户，请先在群内使用 /add_id 创建商户标识。")
+            return
+        await message.answer(f"当前余额: {MoneyService.format_cents(merchant.balance)}")
+
+    @router.message(Command(commands=["exchange"]))
+    async def exchange(message: Message) -> None:
+        args = split_command_args(message.text or "")
+        if len(args) != 1:
+            await message.answer("用法: /exchange [金额]")
+            return
+
+        try:
+            amount_cents = MoneyService.parse_amount_to_cents(args[0])
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
+        if amount_cents <= 0:
+            await message.answer("金额必须大于 0。")
+            return
+
+        now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+
+        async with session_factory() as session:
+            merchant = await MerchantService.get_by_chat_id_for_update(session, message.chat.id)
+            if merchant is None:
+                await message.answer("当前群组未绑定商户，请先在群内使用 /add_id 创建商户标识。")
+                return
+
+            if amount_cents > merchant.balance:
+                await message.answer(
+                    f"申请打款金额 {MoneyService.format_cents(amount_cents)} "
+                    f"超过当前余额 {MoneyService.format_cents(merchant.balance)}，无法完成。"
+                )
+                return
+
+            merchant.balance -= amount_cents
+            remaining = merchant.balance
+            await session.commit()
+
+            actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
+            merchant_u = FinanceService.merchant_u_rate(actual_u)
+
+        amount_decimal = MoneyService.cents_to_decimal(amount_cents)
+        usd = amount_decimal / merchant_u
+
+        await message.answer(
+            "\n".join(
+                [
+                    f"时间: {now}",
+                    f"商户: {merchant.merchant_code or merchant.name}",
+                    f"申请打款金额: {MoneyService.format_cents(amount_cents)}",
+                    f"今日u价: {merchant_u}",
+                    f"usd: {MoneyService.format_cents(amount_cents)}/{merchant_u}={MoneyService.format_decimal(usd)}",
+                ]
+            )
+        )
+
     return router
