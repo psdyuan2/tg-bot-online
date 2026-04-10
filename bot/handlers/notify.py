@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_CEILING, Decimal
 
 from aiogram import Router
 from aiogram.enums import ChatType
@@ -189,7 +189,7 @@ def build_notify_router(
             merchant_u = FinanceService.merchant_u_rate(actual_u)
 
         amount_decimal = MoneyService.cents_to_decimal(amount_cents)
-        usd = (amount_decimal / merchant_u).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        usd = (amount_decimal / merchant_u).quantize(Decimal("1"), rounding=ROUND_CEILING)
 
         await message.answer(
             "\n".join(
