@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from aiogram import Bot, Router
@@ -113,7 +113,7 @@ def build_admin_router(
             await message.answer(str(exc))
             return
 
-        now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
         async with session_factory() as session:
             merchant = await MerchantService.get_by_identifier(session, merchant_identifier)
@@ -199,7 +199,7 @@ def build_admin_router(
             if locked is None:
                 await message.answer("未找到对应商户。")
                 return
-            today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             snapshot = await ReportService.build_unreconciled_snapshot(session, locked.id)
             await session.refresh(locked)
             balance_before = locked.balance

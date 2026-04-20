@@ -13,6 +13,24 @@ from sqlalchemy.ext.asyncio import (
 )
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def normalize_database_url(database_url: str) -> str:
+    url = make_url(database_url)
+    if url.drivername != "sqlite+aiosqlite":
+        return database_url
+    if not url.database or url.database == ":memory:":
+        return database_url
+
+    db_path = Path(url.database)
+    if db_path.is_absolute():
+        return database_url
+
+    resolved = (PROJECT_ROOT / db_path).resolve()
+    return str(url.set(database=str(resolved)))
+
+
 def _ensure_sqlite_parent_dir(database_url: str) -> None:
     url = make_url(database_url)
     if url.drivername != "sqlite+aiosqlite":
@@ -26,6 +44,7 @@ def _ensure_sqlite_parent_dir(database_url: str) -> None:
 
 
 def create_engine(database_url: str) -> AsyncEngine:
+    database_url = normalize_database_url(database_url)
     _ensure_sqlite_parent_dir(database_url)
     return create_async_engine(database_url, echo=False, pool_pre_ping=True)
 
