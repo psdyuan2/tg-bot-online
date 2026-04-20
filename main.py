@@ -30,7 +30,6 @@ async def run() -> None:
             benefit_bot,
             settings.default_u_rate,
             settings.default_settle_fee_rate,
-            settings.default_dividend_rate,
         )
     )
 

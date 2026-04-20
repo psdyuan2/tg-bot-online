@@ -14,7 +14,6 @@ from bot.services.finance import FinanceService, MoneyService, PayoutResult, Set
 
 U_RATE_KEY = "U_RATE"
 SETTLE_FEE_RATE_KEY = "SETTLE_FEE_RATE"
-DIVIDEND_RATE_KEY = "DIVIDEND_RATE"
 
 
 def merchant_display(merchant: Merchant) -> str:
@@ -82,27 +81,6 @@ class SystemConfigService:
         record = await session.get(SystemConfig, SETTLE_FEE_RATE_KEY)
         if record is None:
             record = SystemConfig(key=SETTLE_FEE_RATE_KEY, value=str(rate))
-            session.add(record)
-        else:
-            record.value = str(rate)
-        await session.commit()
-        return rate
-
-    @staticmethod
-    async def get_dividend_rate(session: AsyncSession, default_rate: Decimal) -> Decimal:
-        record = await session.get(SystemConfig, DIVIDEND_RATE_KEY)
-        if record is None:
-            record = SystemConfig(key=DIVIDEND_RATE_KEY, value=str(default_rate))
-            session.add(record)
-            await session.commit()
-            return default_rate
-        return Decimal(record.value)
-
-    @staticmethod
-    async def set_dividend_rate(session: AsyncSession, rate: Decimal) -> Decimal:
-        record = await session.get(SystemConfig, DIVIDEND_RATE_KEY)
-        if record is None:
-            record = SystemConfig(key=DIVIDEND_RATE_KEY, value=str(rate))
             session.add(record)
         else:
             record.value = str(rate)
@@ -203,6 +181,7 @@ class MerchantService:
                 tg_chat_id=chat_id,
                 balance=0,
                 benefit_balance=Decimal("0"),
+                benefit_rate=Decimal("0"),
             )
         )
         await session.commit()
@@ -253,6 +232,13 @@ class MerchantService:
         await session.commit()
         return True, f"商户标识已更新为: {new_code}"
 
+    @staticmethod
+    async def set_benefit_rate(session: AsyncSession, merchant: Merchant, rate: Decimal) -> Decimal:
+        merchant.benefit_rate = rate
+        await session.commit()
+        await session.refresh(merchant)
+        return Decimal(merchant.benefit_rate)
+
 
 class LedgerService:
     @staticmethod
@@ -262,13 +248,13 @@ class LedgerService:
         gross_amount_cents: int,
         *,
         settle_fee_rate: Decimal,
-        dividend_rate: Decimal,
         default_u_rate: Decimal,
     ) -> tuple[SettlementResult, Decimal | None]:
         actual_u = await SystemConfigService.get_u_rate(session, default_u_rate)
         result = FinanceService.calculate_settlement(gross_amount_cents, settle_fee_rate)
         merchant.balance += result.net_amount_cents
         dividend_usdt_added: Decimal | None = None
+        dividend_rate = Decimal(merchant.benefit_rate)
         if dividend_rate > 0:
             div_cents = int(
                 (Decimal(result.net_amount_cents) * dividend_rate).quantize(

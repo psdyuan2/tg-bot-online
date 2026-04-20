@@ -25,6 +25,7 @@ async def test_get_by_identifier_resolves_merchant_code_case_insensitive() -> No
                 tg_chat_id=-100,
                 balance=0,
                 benefit_balance=Decimal("0"),
+                benefit_rate=Decimal("0"),
             )
         )
         await session.commit()
@@ -42,6 +43,7 @@ def test_merchant_display_prefers_code() -> None:
         tg_chat_id=1,
         balance=0,
         benefit_balance=Decimal("0"),
+        benefit_rate=Decimal("0"),
     )
     assert merchant_display(m) == "abc12345"
 
@@ -51,5 +53,6 @@ def test_merchant_display_prefers_code() -> None:
         tg_chat_id=2,
         balance=0,
         benefit_balance=Decimal("0"),
+        benefit_rate=Decimal("0"),
     )
     assert merchant_display(m2) == "legacy"

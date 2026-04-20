@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from aiogram import Bot, Router
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from bot.db.models import Merchant
 from bot.handlers.common import (
     parse_decimal_arg,
+    parse_dividend_rate_arg,
     parse_fee_rate_arg,
     split_command_args,
 )
@@ -32,15 +34,14 @@ def build_admin_router(
     benefit_bot: Bot,
     default_u_rate: Decimal,
     default_settle_fee_rate: Decimal,
-    default_dividend_rate: Decimal,
 ) -> Router:
     router = Router(name="admin")
 
-    @router.message(Command(commands=["uset"]))
+    @router.message(Command(commands=["uset", "setu"]))
     async def set_u_rate(message: Message) -> None:
         args = split_command_args(message.text or "")
         if len(args) != 1:
-            await message.answer("用法: /uset [实际U价]")
+            await message.answer("用法: /uset [实际U价] 或 /setu [实际U价]")
             return
 
         try:
@@ -54,11 +55,11 @@ def build_admin_router(
 
         await message.answer(f"实际 U 价已更新为: {u_rate}")
 
-    @router.message(Command(commands=["set_payout_fit"]))
+    @router.message(Command(commands=["set_payin_rate"]))
     async def set_settle_fee_rate(message: Message) -> None:
         args = split_command_args(message.text or "")
         if len(args) != 1:
-            await message.answer("用法: /set_payout_fit [结算入账服务费率]\n例如 6.5 或 0.065 表示 6.5%。")
+            await message.answer("用法: /set_payin_rate [结算入账服务费率]\n例如 6.5 或 0.065 表示 6.5%。")
             return
         try:
             rate = parse_fee_rate_arg(args[0])
@@ -68,6 +69,33 @@ def build_admin_router(
         async with session_factory() as session:
             await SystemConfigService.set_settle_fee_rate(session, rate)
         await message.answer(f"结算入账服务费率已设为: {rate}（{rate * Decimal(100)}%）")
+
+    @router.message(Command(commands=["set_benefit_rate"]))
+    async def set_benefit_rate(message: Message) -> None:
+        args = split_command_args(message.text or "")
+        if len(args) != 2:
+            await message.answer(
+                "用法: /set_benefit_rate [商户标识] [分红率]\n例如 /set_benefit_rate zw 1 表示该商户按净入账的 1% 分红。"
+            )
+            return
+        merchant_identifier, raw_rate = args
+        try:
+            rate = parse_dividend_rate_arg(raw_rate)
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
+        async with session_factory() as session:
+            merchant = await MerchantService.get_by_identifier(session, merchant_identifier)
+            if merchant is None:
+                await message.answer("未找到对应商户，请确认商户标识正确。")
+                return
+            await MerchantService.set_benefit_rate(session, merchant, rate)
+
+        rate_pct = (rate * Decimal(100)).quantize(Decimal("0.01"))
+        await message.answer(
+            f"商户 {merchant_display(merchant)} 分红率已设为: {rate}（{rate_pct:g}%）"
+        )
 
     @router.message(Command(commands=["settle"]))
     async def settle(message: Message) -> None:
@@ -94,13 +122,11 @@ def build_admin_router(
                 return
 
             settle_fee = await SystemConfigService.get_settle_fee_rate(session, default_settle_fee_rate)
-            dividend_rate = await SystemConfigService.get_dividend_rate(session, default_dividend_rate)
             result, dividend_usdt = await LedgerService.settle(
                 session,
                 merchant,
                 gross_amount_cents,
                 settle_fee_rate=settle_fee,
-                dividend_rate=dividend_rate,
                 default_u_rate=default_u_rate,
             )
 
@@ -138,9 +164,10 @@ def build_admin_router(
                 benefit_chats = await BenefitBindingService.list_chats_for_merchant(session, merchant.id)
             total_bb = MoneyService.format_usdt_balance(Decimal(merchant.benefit_balance))
             div_line = MoneyService.format_usdt_balance(dividend_usdt)
+            benefit_rate_pct = (Decimal(merchant.benefit_rate) * Decimal(100)).quantize(Decimal("0.01"))
             notice = (
                 f"分红通知\n商户: {label}\n本笔净入账: {MoneyService.format_cents(result.net_amount_cents)}\n"
-                f"本笔分红: +{div_line} USDT\n该商户分红累计: {total_bb} USDT"
+                f"分红率: {benefit_rate_pct:g}%\n本笔分红: +{div_line} USDT\n该商户分红累计: {total_bb} USDT"
             )
             failed_chats: list[str] = []
             for cid in benefit_chats:

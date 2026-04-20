@@ -9,9 +9,9 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.db.models import Merchant
-from bot.handlers.common import parse_dividend_rate_arg, split_command_args
+from bot.handlers.common import split_command_args
 from bot.services.finance import MoneyService
-from bot.services.ledger import BenefitBindingService, MerchantService, SystemConfigService, merchant_display
+from bot.services.ledger import BenefitBindingService, MerchantService, merchant_display
 
 
 def build_benefit_router(
@@ -21,18 +21,7 @@ def build_benefit_router(
 
     @router.message(Command(commands=["set_fit"]))
     async def set_dividend_rate(message: Message) -> None:
-        args = split_command_args(message.text or "")
-        if len(args) != 1:
-            await message.answer("用法: /set_fit [分红率]\n例如 1 表示 1%，或 0.01。")
-            return
-        try:
-            rate = parse_dividend_rate_arg(args[0])
-        except ValueError as exc:
-            await message.answer(str(exc))
-            return
-        async with session_factory() as session:
-            await SystemConfigService.set_dividend_rate(session, rate)
-        await message.answer(f"分红率已设为: {rate}（{rate * Decimal(100)}%）")
+        await message.answer("该命令已停用，请在管理机器人使用 /set_benefit_rate [商户标识] [分红率]。")
 
     @router.message(Command(commands=["add_id"]))
     async def benefit_bind_merchant(message: Message) -> None:
@@ -51,7 +40,7 @@ def build_benefit_router(
             created = await BenefitBindingService.bind(session, message.chat.id, merchant.id)
         label = merchant_display(merchant)
         if created:
-            await message.answer(f"已绑定商户 {label}。该商户每笔结算产生的分红将按本群 /set_fit 推送至本群。")
+            await message.answer(f"已绑定商户 {label}。该商户每笔结算产生的分红将推送至本群。")
         else:
             await message.answer(f"商户 {label} 已绑定到本群。")
 

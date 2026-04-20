@@ -42,6 +42,12 @@ class Merchant(Base):
         default=Decimal("0"),
         server_default="0",
     )
+    benefit_rate: Mapped[Decimal] = mapped_column(
+        Numeric(12, 8),
+        nullable=False,
+        default=Decimal("0"),
+        server_default="0",
+    )
 
     transactions: Mapped[list[Transaction]] = relationship(
         back_populates="merchant",

@@ -15,7 +15,6 @@ class Settings:
     database_url: str
     default_u_rate: Decimal
     default_settle_fee_rate: Decimal
-    default_dividend_rate: Decimal
 
 
 def _load_env() -> None:
@@ -48,5 +47,4 @@ def load_settings() -> Settings:
         database_url=database_url,
         default_u_rate=Decimal(os.getenv("DEFAULT_U_RATE", "7.20")),
         default_settle_fee_rate=Decimal(os.getenv("DEFAULT_SETTLE_FEE_RATE", "0.065")),
-        default_dividend_rate=Decimal(os.getenv("DEFAULT_DIVIDEND_RATE", "0.01")),
     )
